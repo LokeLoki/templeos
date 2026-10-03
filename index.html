@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TempleOS</title>
+<style>
+  :root {
+    --bg: #a80000;
+    --bg-deep: #8b0000;
+    --yellow: #ffff00;
+    --blue: #00ffff;
+    --white: #ffffff;
+    --green: #00ff00;
+    --mono: "Consolas", "Lucida Console", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--yellow);
+    user-select: none;
+    cursor: default;
+  }
+
+  /* ---------- BOOT SCREEN ---------- */
+  #boot {
+    position: absolute; inset: 0;
+    background: #000000;
+    color: #c0c0c0;
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow: hidden;
+  }
+  #boot .hi  { color: var(--green); }
+  #boot .warn{ color: var(--yellow); }
+
+  /* ---------- DESKTOP ---------- */
+  #desk { position: absolute; inset: 0; display: none; flex-direction: column; }
+  #titlebar {
+    height: 26px;
+    background: var(--bg-deep);
+    border-bottom: 2px solid #ff4040;
+    display: flex; align-items: center;
+    padding: 0 10px;
+    font-size: 13px; color: var(--white);
+    gap: 18px;
+  }
+  #titlebar b { color: var(--yellow); }
+  #titlebar .right { margin-left: auto; color: var(--blue); }
+
+  #center {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px;
+    text-align: center;
+  }
+  #osname {
+    font-size: clamp(42px, 9vw, 96px);
+    font-weight: bold;
+    color: var(--yellow);
+    text-shadow: 4px 4px 0 #400000;
+    letter-spacing: 4px;
+  }
+  #subtitle { color: var(--white); font-size: 15px; letter-spacing: 2px; }
+  #clock { color: var(--blue); font-size: 22px; margin-top: 8px; }
+  #quote { color: #ffb0b0; font-size: 13px; margin-top: 14px; max-width: 640px; }
+
+  /* ---------- TERMINAL ---------- */
+  #term {
+    height: 46%;
+    background: rgba(0,0,0,0.82);
+    border-top: 2px solid #ff4040;
+    padding: 10px 14px;
+    overflow-y: auto;
+    font-size: 14px;
+    line-height: 1.45;
+    cursor: text;
+    user-select: text;
+  }
+  #term .out { white-space: pre-wrap; }
+  #term .prompt-line { display: flex; }
+  #term .ps1 { color: var(--green); margin-right: 6px; }
+  #term input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--blue);
+    font-family: var(--mono);
+    font-size: 14px;
+    caret-color: var(--blue);
+  }
+  .c-blue { color: var(--blue); }
+  .c-green { color: var(--green); }
+  .c-yellow { color: var(--yellow); }
+  .c-white { color: var(--white); }
+
+  #statusbar {
+    height: 24px;
+    background: var(--bg-deep);
+    border-top: 2px solid #ff4040;
+    display: flex; align-items: center;
+    padding: 0 10px;
+    font-size: 12px; color: var(--white);
+    gap: 16px;
+  }
+  #statusbar .right { margin-left: auto; }
+  .blink { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .blink { animation: none; }
+    #osname { text-shadow: 4px 4px 0 #400000; }
+  }
+</style>
+</head>
+<body>
+
+<div id="boot"></div>
+
+<div id="desk">
+  <div id="titlebar">
+    <b>TempleOS</b> <span>v2.07 HTSBL</span>
+    <span class="right" id="keys">Ctrl+Alt+Del = reboot &nbsp; F1 = help</span>
+  </div>
+
+  <div id="center">
+    <div id="osname">TempleOS</div>
+    <div id="subtitle">THE THIRD TEMPLE &nbsp;&middot;&nbsp; HOLY SPIRIT OS</div>
+    <div id="clock">--:--:--</div>
+    <div id="quote">&nbsp;</div>
+  </div>
+
+  <div id="term" tabindex="-1">
+    <div class="out" id="out"></div>
+    <div class="prompt-line">
+      <span class="ps1">C:\&gt;</span><input id="input" autocomplete="off" spellcheck="false" autofocus>
+    </div>
+  </div>
+
+  <div id="statusbar">
+    <span>FLOPPY 0 OK</span><span>HD 1 OK</span><span>SOUNDS ON</span>
+    <span class="right">640x480 &middot; 320x200 &middot; Mode 13h in spirit</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- BOOT SEQUENCE ----------
+const bootLines = [
+  ["",      "TempleOS BIOS v2.07 ... OK"],
+  ["",      "CPU detected: x86-64 (emulated in browser)"],
+  ["hi",    "Memory test: 640K base / plenty extended ... PASS"],
+  ["",      "Loading U: drive ...................."],
+  ["",      "Loading F: drive ...................."],
+  ["hi",    "Loading C: (HTSBL) ................... OK"],
+  ["warn",  "Checking for sin ............... 1 found (universal)"],
+  ["hi",    "Grace applied ....................... OK"],
+  ["",      "Mounting /love ...................... OK"],
+  ["hi",    "Starting Holy Spirit window manager . OK"],
+  ["",      ""],
+  ["hi",    "Welcome, thou art welcome."],
+];
+
+const bootEl = document.getElementById("boot");
+const deskEl = document.getElementById("desk");
+let bi = 0;
+function bootStep() {
+  if (bi < bootLines.length) {
+    const [cls, txt] = bootLines[bi++];
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.textContent = txt + "\n";
+    bootEl.appendChild(span);
+    setTimeout(bootStep, 120 + Math.random() * 220);
+  } else {
+    setTimeout(() => {
+      bootEl.style.display = "none";
+      deskEl.style.display = "flex";
+      print("TempleOS v2.07 up. Type HELP for commands.", "c-green");
+      document.getElementById("input").focus();
+    }, 900);
+  }
+}
+bootStep();
+
+// ---------- CLOCK + QUOTES ----------
+function tick() {
+  const d = new Date();
+  document.getElementById("clock").textContent =
+    d.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" }) +
+    "  " + d.toLocaleTimeString();
+}
+tick(); setInterval(tick, 1000);
+
+const quotes = [
+  "The mind of man can plan a highway, but only God can make a tree.",
+  "Measure what is measurable, and make measurable what is not.",
+  "In the beginning was the Word, and the Word was with God.",
+  "A computer without a draw routine is like a tree falling in the forest.",
+];
+document.getElementById("quote").textContent = quotes[Math.floor(Math.random() * quotes.length)];
+
+// ---------- TERMINAL ----------
+const out = document.getElementById("out");
+const input = document.getElementById("input");
+const term = document.getElementById("term");
+
+function print(text, cls) {
+  const div = document.createElement("div");
+  div.className = "out" + (cls ? " " + cls : "");
+  div.textContent = text;
+  out.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+}
+
+const fs = ["README.1ST", "BIBLE.HTM", "LOV.TXT", "TEMPLE.S", "TETRIS.S", "CHESS.S", "PONG.S", "MESH.S", "GENOME.TXT", "ZOO.S"];
+
+const commands = {
+  help() {
+    return "Commands:\n" +
+      "  HELP        this list\n" +
+      "  DIR         list C:\\ files\n" +
+      "  TYPE file   print a file\n" +
+      "  VERSE       random verse reference\n" +
+      "  TALK        consult the Admin\n" +
+      "  DATE        current date/time\n" +
+      "  CLEAR       clear screen\n" +
+      "  REBOOT      reboot the OS\n" +
+      "  ID          who am I?";
+  },
+  dir() { return fs.join("   "); },
+  type(arg) {
+    const f = (arg || "").toUpperCase();
+    if (f === "README.1ST") return "This OS is a temple. Do not divide it.\nEverything is one address space. No memory protection. No mercy.";
+    if (f === "LOV.TXT") return "L O V E\n\n(That is the whole file. It is correct.)";
+    if (f === "BIBLE.HTM") return "[HTML file — 66 books, 1 compression ratio: none]";
+    if (fs.includes(f)) return "(binary source, 1993-era commenting style)";
+    return "File not found: " + (arg || "(no name)");
+  },
+  verse() {
+    const books = ["Genesis","Psalms","Proverbs","Isaiah","Matthew","John","Romans","Revelation"];
+    const b = books[Math.floor(Math.random()*books.length)];
+    return b + " " + (1+Math.floor(Math.random()*50)) + ":" + (1+Math.floor(Math.random()*30));
+  },
+  talk() {
+    const a = [
+      "Be still, and compute.",
+      "Thy code is messy, but thy heart is in the right register.",
+      "Go forth. Comment thy functions.",
+      "The Admin laughs at null pointer exceptions.",
+      "Thou shalt not put GOTO in the hot loop. (Except Me.)",
+    ];
+    return "ADMIN> " + a[Math.floor(Math.random()*a.length)];
+  },
+  date() { return new Date().toString(); },
+  id() { return "You are a guest in the temple. Act accordingly.", "c-white" },
+  clear() { out.innerHTML = ""; return null; },
+  reboot() { location.reload(); return null; },
+};
+
+function run(cmd) {
+  print("C:\\> " + cmd);
+  const parts = cmd.trim().split(/\s+/);
+  const name = (parts[0] || "").toLowerCase();
+  if (!name) return;
+  const fn = commands[name];
+  if (fn) {
+    const r = fn(parts.slice(1).join(" "));
+    if (r) print(r);
+  } else {
+    print("Unknown command: " + name + "  (type HELP)", "c-yellow");
+  }
+}
+
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    run(input.value);
+    input.value = "";
+  }
+});
+term.addEventListener("mousedown", () => input.focus());
+
+// Ctrl+Alt+Del = reboot, F1 = help
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.altKey && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault(); location.reload();
+  }
+  if (e.key === "F1") { e.preventDefault(); run("help"); }
+});
+
+// keep focus on the prompt (it's an OS, not a website)
+document.addEventListener("keyup", () => { if (deskEl.style.display === "flex") input.focus(); });
+</script>
+</body>
+</html>

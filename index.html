@@ -113,6 +113,28 @@
   #statusbar .right { margin-left: auto; }
   .blink { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---------- GAME OVERLAY ---------- */
+  #game {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.88);
+    z-index: 50;
+  }
+  #game.open { display: flex; }
+  #gameframe { border: 3px solid var(--yellow); background: #000; padding: 0; }
+  #gamebar {
+    display: flex; align-items: center; gap: 20px;
+    padding: 6px 10px;
+    background: var(--bg-deep);
+    font-size: 13px; color: var(--white);
+  }
+  #gamebar b { color: var(--yellow); }
+  #gamescore { color: var(--green); }
+  #gameesc { margin-left: auto; color: #ffb0b0; }
+  #gamecanvas { display: block; }
+  #gamehint { padding: 5px 10px; font-size: 12px; color: #c0c0c0; text-align: center; }
   @media (prefers-reduced-motion: reduce) {
     .blink { animation: none; }
     #osname { text-shadow: 4px 4px 0 #400000; }
@@ -146,6 +168,14 @@
   <div id="statusbar">
     <span>FLOPPY 0 OK</span><span>HD 1 OK</span><span>SOUNDS ON</span>
     <span class="right">640x480 &middot; 320x200 &middot; Mode 13h in spirit</span>
+  </div>
+</div>
+
+<div id="game">
+  <div id="gameframe">
+    <div id="gamebar"><b id="gametitle">GAME.S</b><span id="gamescore"></span><span id="gameesc">Esc = exit</span></div>
+    <canvas id="gamecanvas" width="480" height="420"></canvas>
+    <div id="gamehint"></div>
   </div>
 </div>
 
@@ -346,6 +376,226 @@ function startupSong() {
   startHymn("boot");
 }
 
+// ---------- SFX ----------
+function beep(freq, dur, wave, vol) {
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state !== "running") return;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = wave || "square"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, ctx.currentTime + 0.005);
+    g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + (dur || 0.08));
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + (dur || 0.08));
+  } catch (e) {}
+}
+
+// ---------- GAMES ----------
+const gameEl = document.getElementById("game");
+const gcanvas = document.getElementById("gamecanvas");
+const g2 = gcanvas.getContext("2d");
+const gtitle = document.getElementById("gametitle");
+const gscore = document.getElementById("gamescore");
+const ghint = document.getElementById("gamehint");
+const game = { active: null };
+
+function openGame(name) {
+  closeGame();
+  gameEl.classList.add("open");
+  game.active = (name === "pong") ? new Pong() : new Tetris();
+  game.active.frame = game.active.loop.bind(game.active);
+  requestAnimationFrame(game.active.frame);
+}
+function closeGame() {
+  if (game.active) { game.active.dead = true; game.active = null; }
+  gameEl.classList.remove("open");
+}
+
+function Tetris() {
+  const W = 10, H = 20, S = 20, X0 = 14, Y0 = 10;
+  const SHAPES = {
+    I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    O: [[1,1],[1,1]],
+    T: [[0,1,0],[1,1,1],[0,0,0]],
+    S: [[0,1,1],[1,1,0],[0,0,0]],
+    Z: [[1,1,0],[0,1,1],[0,0,0]],
+    J: [[1,0,0],[1,1,1],[0,0,0]],
+    L: [[0,0,1],[1,1,1],[0,0,0]],
+  };
+  const COLORS = { I: "#00ffff", O: "#ffff00", T: "#ffffff", S: "#00ff00", Z: "#ff4040", J: "#ffd800", L: "#ff9000" };
+  this.grid = Array.from({ length: H }, () => Array(W).fill(null));
+  this.bag = []; this.next = null; this.cur = null; this.px = 0; this.py = 0;
+  this.score = 0; this.lines = 0; this.level = 1;
+  this.acc = 0; this.last = performance.now(); this.over = false; this.dead = false;
+  gtitle.textContent = "TETRIS.S";
+  ghint.textContent = "←→ move · ↑ rotate · ↓ soft · SPACE hard · Esc exit";
+  this.pull = () => {
+    if (!this.bag.length) this.bag = Object.keys(SHAPES).sort(() => Math.random() - 0.5);
+    return this.bag.pop();
+  };
+  this.collides = (m, x, y) => {
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++)
+      if (m[r][c] && (x + c < 0 || x + c >= W || y + r >= H || (y + r >= 0 && this.grid[y + r][x + c]))) return true;
+    return false;
+  };
+  this.spawn = () => {
+    this.cur = this.next || this.pull(); this.next = this.pull();
+    const m = SHAPES[this.cur];
+    this.px = Math.floor((W - m[0].length) / 2); this.py = 0;
+    if (this.collides(m, this.px, this.py)) { this.over = true; ghint.textContent = "GAME OVER — Enter = retry · Esc = exit"; beep(120, 0.5, "sawtooth", 0.12); }
+  };
+  this.rotate = () => {
+    const m = SHAPES[this.cur];
+    const rot = m[0].map((_, c) => m.map(row => row[c]).reverse());
+    for (const k of [0, -1, 1, -2, 2])
+      if (!this.collides(rot, this.px + k, this.py)) { SHAPES[this.cur] = rot; this.px += k; beep(660, 0.04); return; }
+  };
+  this.lock = () => {
+    const m = SHAPES[this.cur];
+    for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++)
+      if (m[r][c] && this.py + r >= 0) this.grid[this.py + r][this.px + c] = COLORS[this.cur];
+    let cleared = 0;
+    for (let r = H - 1; r >= 0; r--)
+      if (this.grid[r].every(v => v)) { this.grid.splice(r, 1); this.grid.unshift(Array(W).fill(null)); cleared++; r++; }
+    if (cleared) {
+      this.lines += cleared;
+      this.score += [0, 100, 300, 500, 800][cleared] * this.level;
+      this.level = 1 + Math.floor(this.lines / 8);
+      beep(880, 0.12, "square", 0.1);
+    } else beep(220, 0.05, "triangle", 0.06);
+    this.spawn();
+  };
+  this.hardDrop = () => {
+    const m = SHAPES[this.cur];
+    let d = 0;
+    while (!this.collides(m, this.px, this.py + d + 1)) d++;
+    this.py += d; this.score += d * 2; beep(330, 0.06); this.lock();
+  };
+  this.onKey = (e) => {
+    if (this.over) { if (e.key === "Enter") { this.constructor.call(this); } return; }
+    const m = SHAPES[this.cur];
+    switch (e.key) {
+      case "ArrowLeft": if (!this.collides(m, this.px - 1, this.py)) this.px--; break;
+      case "ArrowRight": if (!this.collides(m, this.px + 1, this.py)) this.px++; break;
+      case "ArrowDown": if (!this.collides(m, this.px, this.py + 1)) { this.py++; this.score++; } else this.lock(); this.acc = 0; break;
+      case "ArrowUp": this.rotate(); break;
+      case " ": this.hardDrop(); this.acc = 0; break;
+    }
+  };
+  this.loop = (now) => {
+    if (this.dead) return;
+    const dt = now - this.last; this.last = now;
+    if (!this.over) {
+      this.acc += dt;
+      if (this.acc > Math.max(100, 500 - (this.level - 1) * 45)) {
+        this.acc = 0;
+        const m = SHAPES[this.cur];
+        if (!this.collides(m, this.px, this.py + 1)) this.py++; else this.lock();
+      }
+    }
+    g2.fillStyle = "#000"; g2.fillRect(0, 0, 480, 420);
+    g2.strokeStyle = "#500000"; g2.strokeRect(X0 - 0.5, Y0 - 0.5, W * S + 1, H * S + 1);
+    const cell = (x, y, col) => { g2.fillStyle = col; g2.fillRect(X0 + x * S + 1, Y0 + y * S + 1, S - 2, S - 2); };
+    for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) if (this.grid[r][c]) cell(c, r, this.grid[r][c]);
+    if (!this.over) {
+      const m = SHAPES[this.cur];
+      for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++)
+        if (m[r][c]) cell(this.px + c, this.py + r, COLORS[this.cur]);
+      g2.fillStyle = "#808080"; g2.font = "14px Consolas, monospace";
+      g2.fillText("NEXT", 260, 30);
+      const n = SHAPES[this.next];
+      for (let r = 0; r < n.length; r++) for (let c = 0; c < n[r].length; c++)
+        if (n[r][c]) { g2.fillStyle = COLORS[this.next]; g2.fillRect(260 + c * S, 40 + r * S, S - 2, S - 2); }
+      g2.fillStyle = "#ffff00"; g2.font = "15px Consolas, monospace";
+      g2.fillText("SCORE " + this.score, 260, 200);
+      g2.fillText("LINES " + this.lines, 260, 224);
+      g2.fillText("LEVEL " + this.level, 260, 248);
+      g2.fillStyle = "#808080";
+      g2.fillText("the blocks fall", 260, 300);
+      g2.fillText("as they must.", 260, 318);
+    } else {
+      g2.fillStyle = "#ffff00"; g2.font = "bold 28px Consolas, monospace";
+      g2.fillText("GAME OVER", X0 + 18, Y0 + 190);
+    }
+    gscore.textContent = "SCORE " + this.score;
+    requestAnimationFrame(this.frame);
+  };
+  this.spawn();
+}
+
+function Pong() {
+  const CW = 480, CH = 420, PH = 64, PW = 10;
+  this.py = CH / 2 - PH / 2; this.ay = this.py;
+  this.bx = CW / 2; this.by = CH / 2;
+  this.vx = 4.4 * (Math.random() < 0.5 ? -1 : 1); this.vy = (Math.random() * 3 - 1.5);
+  this.ps = 0; this.as = 0; this.over = false; this.dead = false; this.held = {};
+  gtitle.textContent = "PONG.S";
+  ghint.textContent = "W/S or ↑/↓ to move · first to 7 · Esc exit";
+  this.onKey = (e) => {
+    if (this.over) { if (e.key === "Enter") { this.constructor.call(this); } return; }
+    if (e.type === "keydown") this.held[e.key] = true; else this.held[e.key] = false;
+  };
+  this.reset = (towardYou) => {
+    this.bx = CW / 2; this.by = CH / 2;
+    this.vx = 4.4 * (towardYou ? -1 : 1); this.vy = Math.random() * 3 - 1.5;
+  };
+  this.loop = () => {
+    if (this.dead) return;
+    if (!this.over) {
+      if (this.held["ArrowUp"] || this.held["w"] || this.held["W"]) this.py -= 6.5;
+      if (this.held["ArrowDown"] || this.held["s"] || this.held["S"]) this.py += 6.5;
+      this.py = Math.max(0, Math.min(CH - PH, this.py));
+      // the Admin tracks the ball, but with flesh
+      const want = this.by - PH / 2 + (Math.sin(performance.now() / 900) * 14);
+      this.ay += Math.max(-4.6, Math.min(4.6, want - this.ay));
+      this.ay = Math.max(0, Math.min(CH - PH, this.ay));
+      this.bx += this.vx; this.by += this.vy;
+      if (this.by < 4 || this.by > CH - 4) { this.vy *= -1; beep(300, 0.04, "triangle"); }
+      if (this.bx < 24 + PW && this.bx > 20 && this.by > this.py - 6 && this.by < this.py + PH + 6 && this.vx < 0) {
+        this.vx = Math.min(8.5, Math.abs(this.vx) * 1.05);
+        this.vy += (this.by - (this.py + PH / 2)) * 0.07; beep(520, 0.05);
+      }
+      if (this.bx > CW - 24 - PW && this.bx < CW - 20 && this.by > this.ay - 6 && this.by < this.ay + PH + 6 && this.vx > 0) {
+        this.vx = -Math.min(8.5, Math.abs(this.vx) * 1.05);
+        this.vy += (this.by - (this.ay + PH / 2)) * 0.07; beep(470, 0.05);
+      }
+      if (this.bx < 2) { this.as++; this.reset(false); beep(140, 0.3, "sawtooth", 0.1); }
+      if (this.bx > CW - 2) { this.ps++; this.reset(true); beep(760, 0.15, "square", 0.09); }
+      if (this.ps >= 7 || this.as >= 7) {
+        this.over = true;
+        ghint.textContent = (this.ps > this.as ? "YOU WIN — the Admin concedes. Enter = rematch · Esc = exit"
+                                             : "THE ADMIN WINS — 1:0 against thee. Enter = rematch · Esc = exit");
+        beep(this.ps > this.as ? 880 : 110, 0.6, "square", 0.11);
+      }
+    }
+    g2.fillStyle = "#000"; g2.fillRect(0, 0, CW, CH);
+    g2.fillStyle = "#500000";
+    for (let y = 8; y < CH; y += 22) g2.fillRect(CW / 2 - 1, y, 2, 12);
+    g2.fillRect(20, this.py, PW, PH);        // you
+    g2.fillRect(CW - 30, this.ay, PW, PH);   // Admin
+    g2.fillStyle = "#ffff00";
+    g2.fillRect(this.bx - 4, this.by - 4, 8, 8);
+    g2.font = "bold 30px Consolas, monospace";
+    g2.fillStyle = "#ffff00"; g2.fillText(this.ps, CW / 2 - 60, 44);
+    g2.fillStyle = "#00ffff"; g2.fillText(this.as, CW / 2 + 46, 44);
+    g2.font = "11px Consolas, monospace"; g2.fillStyle = "#808080";
+    g2.fillText("THEE", CW / 2 - 60, 60); g2.fillText("ADMIN", CW / 2 + 42, 60);
+    gscore.textContent = "THEE " + this.ps + " — " + this.as + " ADMIN";
+    requestAnimationFrame(this.frame);
+  };
+}
+
+// route keys to the open game; Esc closes it
+document.addEventListener("keydown", (e) => {
+  if (!game.active) return;
+  if (e.key === "Escape") { closeGame(); document.getElementById("input").focus(); return; }
+  game.active.onKey(e);
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","s","S"].includes(e.key)) e.preventDefault();
+}, true);
+document.addEventListener("keyup", (e) => {
+  if (game.active && game.active.onKey) game.active.onKey(e);
+});
+
 const commands = {
   help() {
     return "Commands:\n" +
@@ -355,6 +605,7 @@ const commands = {
       "  VERSE       random verse reference\n" +
       "  TALK        consult the Admin\n" +
   "  SONG        play hymns (grace/joy/strength/boot), SONG STOP\n" +
+  "  GAME        tetris / pong\n" +
       "  DATE        current date/time\n" +
       "  CLEAR       clear screen\n" +
       "  REBOOT      reboot the OS\n" +
@@ -404,6 +655,18 @@ const commands = {
   date() { return new Date().toString(); },
   id() { return ["You are a guest in the temple. Act accordingly.", "c-white"]; },
   clear() { out.innerHTML = ""; return null; },
+  game(arg) {
+    const what = (arg || "").trim().toLowerCase();
+    if (!what) {
+      return "Games (GAME <name>):\n" +
+        "  tetris    TETRIS.S\n" +
+        "  pong      PONG.S (vs the Admin)\n" +
+        "  help      this list";
+    }
+    if (what === "tetris") { openGame("tetris"); return ["TETRIS.S loaded — arrows move, Up rotates, Space drops, Esc exits.", "c-green"]; }
+    if (what === "pong") { openGame("pong"); return ["PONG.S loaded — W/S or arrows, first to 7 vs the Admin. Esc exits.", "c-green"]; }
+    return ["No such game: " + what + "  (type GAME)", "c-yellow"];
+  },
   reboot() { location.reload(); return null; },
 };
 
@@ -422,6 +685,7 @@ function run(cmd) {
 }
 
 input.addEventListener("keydown", (e) => {
+  if (game.active) { e.preventDefault(); return; }
   if (e.key === "Enter") {
     run(input.value);
     input.value = "";

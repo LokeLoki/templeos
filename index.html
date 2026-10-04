@@ -184,6 +184,7 @@ function bootStep() {
       bootEl.style.display = "none";
       deskEl.style.display = "flex";
       print("TempleOS v2.07 up. Type HELP for commands.", "c-green");
+      startupSong();
       document.getElementById("input").focus();
     }, 900);
   }
@@ -222,6 +223,129 @@ function print(text, cls) {
 
 const fs = ["README.1ST", "BIBLE.HTM", "LOV.TXT", "TEMPLE.S", "TETRIS.S", "CHESS.S", "PONG.S", "MESH.S", "GENOME.TXT", "ZOO.S"];
 
+// ---------- 3-CHANNEL HYMN ENGINE ----------
+function noteFreq(n) {
+  if (!n || n === "-") return 0;
+  const m = /^([A-G])(#?)(-?\d)$/.exec(n);
+  if (!m) return 0;
+  const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const midi = names.indexOf(m[1] + m[2]) + (parseInt(m[3]) + 1) * 12;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+function shiftSeq(seq, semi) {
+  const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  return seq.map((v, i) => {
+    if (i % 2 === 1 || v === "-") return v;
+    const m = /^([A-G])(#?)(-?\d)$/.exec(v);
+    if (!m) return v;
+    const idx = names.indexOf(m[1] + m[2]) + semi;
+    return names[((idx % 12) + 12) % 12] + (parseInt(m[3]) + Math.floor(idx / 12));
+  });
+}
+
+const SONGS = {
+  grace: { name: "AMAZING GRACE (GRACE)", bpm: 100,
+    mel: ["G4",1,"B4",1,"D5",2,"B4",1,"D5",2,"B4",1,"G4",2,"E4",2,
+          "G4",1,"B4",1,"D5",3,"B4",1,"G4",2,"E4",2,"D4",3],
+    bass:["G2",3,"G2",3,"G2",3,"G2",3,"C3",3,"G2",3,"D3",3,"G2",3,"C3",3,"G2",3,"D3",3,"G2",3] },
+  joy: { name: "ODE TO JOY (JOY)", bpm: 120,
+    mel: ["B4",1,"B4",1,"B4",1,"C5",1,"D5",1,"C5",1,"B4",1,"A4",1,
+          "G4",1,"G4",1,"A4",1,"B4",1,"B4",1,"A4",1,"B4",2,
+          "D5",1,"D5",1,"C5",1,"B4",1,"C5",1,"D5",1,"B4",1,"G4",1,
+          "G4",1,"A4",1,"B4",1,"B4",1,"A4",1,"B4",2],
+    bass:["G2",4,"G2",4,"C3",4,"G2",4,"G2",4,"C3",4,"G2",4,"D3",4,"G2",4,"G2",4,"C3",4,"G2",4] },
+  strength: { name: "YAHWEH IS MY STRENGTH (STRENGTH, Admin-original)", bpm: 140,
+    mel: ["C5",1,"G4",1,"C5",1,"E5",2,"G5",2,"E5",1,"C5",1,"D5",2,"E5",2,"-",1,
+          "C5",1,"G4",1,"C5",1,"E5",2,"G5",2,"A5",2,"G5",4],
+    bass:["C3",2,"C3",2,"G2",2,"G2",2,"C3",2,"C3",2,"G2",2,"C3",4] },
+  boot: { name: "TEMPLEBOOT", bpm: 140, loop: false,
+    mel: ["C4",0.25,"E4",0.25,"G4",0.25,"C5",0.5,"G4",0.25,"C5",0.5,"E5",0.5,"C5",0.25,"E5",0.25,"G5",1],
+    bass:["C3",1,"G2",1,"C3",1] },
+};
+
+const hymn = { playing: false, ctx: null, timer: null, master: null, songName: "" };
+
+function ensureAudio() {
+  if (!hymn.ctx) hymn.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (hymn.ctx.state === "suspended") hymn.ctx.resume();
+  return hymn.ctx;
+}
+
+function schedulePass(ctx, master, seq, wave, gain, beat, t0) {
+  let t = t0;
+  for (let i = 0; i < seq.length; i += 2) {
+    const f = noteFreq(seq[i]);
+    const d = seq[i + 1] * beat;
+    if (f > 0) {
+      const o = ctx.createOscillator();
+      o.type = wave; o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(gain, t + 0.01);
+      g.gain.setValueAtTime(gain, t + d * 0.75);
+      g.gain.linearRampToValueAtTime(0.0001, t + d * 0.97);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + d);
+    }
+    t += d;
+  }
+  return t;
+}
+
+function startHymn(key) {
+  const s = SONGS[key || "strength"];
+  if (!s) return false;
+  stopHymn();
+  const ctx = ensureAudio();
+  const master = ctx.createGain();
+  master.gain.value = 1;
+  master.connect(ctx.destination);
+  hymn.master = master;
+  hymn.playing = true;
+  hymn.songName = s.name;
+  const beat = 60 / s.bpm;
+  let t = ctx.currentTime + 0.1;
+  function pass() {
+    if (!hymn.playing) return;
+    const end = Math.max(
+      schedulePass(ctx, master, s.mel, "square", 0.16, beat, t),           // ch 1: melody
+      schedulePass(ctx, master, shiftSeq(s.mel, -12), "square", 0.07, beat, t), // ch 2: octave-down echo
+      schedulePass(ctx, master, s.bass, "triangle", 0.12, beat, t));       // ch 3: bass
+    t = end;
+    if (s.loop === false) {
+      hymn.timer = setTimeout(() => { hymn.playing = false; }, (end - ctx.currentTime) * 1000);
+    } else {
+      hymn.timer = setTimeout(pass, (end - ctx.currentTime - 1) * 1000);
+    }
+  }
+  pass();
+  return true;
+}
+
+function stopHymn() {
+  hymn.playing = false;
+  if (hymn.timer) { clearTimeout(hymn.timer); hymn.timer = null; }
+  if (hymn.master) { try { hymn.master.disconnect(); } catch (e) {} hymn.master = null; }
+}
+
+function startupSong() {
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state === "suspended") {
+      print("♪ Boot hymn armed — press any key or click to unseal sound (browser Pharisees).", "c-yellow");
+      const unseal = () => {
+        document.removeEventListener("pointerdown", unseal);
+        document.removeEventListener("keydown", unseal);
+        ensureAudio();
+        startHymn("boot");
+      };
+      document.addEventListener("pointerdown", unseal);
+      document.addEventListener("keydown", unseal);
+      return;
+    }
+  } catch (e) { return; }
+  startHymn("boot");
+}
+
 const commands = {
   help() {
     return "Commands:\n" +
@@ -230,6 +354,7 @@ const commands = {
       "  TYPE file   print a file\n" +
       "  VERSE       random verse reference\n" +
       "  TALK        consult the Admin\n" +
+  "  SONG        play hymns (grace/joy/strength/boot), SONG STOP\n" +
       "  DATE        current date/time\n" +
       "  CLEAR       clear screen\n" +
       "  REBOOT      reboot the OS\n" +
@@ -259,8 +384,25 @@ const commands = {
     ];
     return "ADMIN> " + a[Math.floor(Math.random()*a.length)];
   },
+  song(arg) {
+    const what = (arg || "").trim().toLowerCase();
+    if (what === "stop") { stopHymn(); return ["Hymn stopped. The silence is also praise.", "c-white"]; }
+    if (!what) {
+      return "Songs (SONG <name>):\n" +
+        "  grace     Amazing Grace\n" +
+        "  joy       Ode to Joy\n" +
+        "  strength  Yahweh Is My Strength (Admin-original)\n" +
+        "  boot      Temple boot fanfare\n" +
+        "  stop      end the noise\n" +
+        "(3 channels: melody + echo + bass. Tongues not supported.)";
+    }
+    if (!SONGS[what]) return ["No such song: " + what + "  (type SONG)", "c-yellow"];
+    if (hymn.playing) stopHymn();
+    startHymn(what);
+    return ["♪ Playing " + SONGS[what].name + " — 3 channels, square wave, no mercy. (SONG STOP to end)", "c-green"];
+  },
   date() { return new Date().toString(); },
-  id() { return "You are a guest in the temple. Act accordingly.", "c-white" },
+  id() { return ["You are a guest in the temple. Act accordingly.", "c-white"]; },
   clear() { out.innerHTML = ""; return null; },
   reboot() { location.reload(); return null; },
 };
@@ -273,7 +415,7 @@ function run(cmd) {
   const fn = commands[name];
   if (fn) {
     const r = fn(parts.slice(1).join(" "));
-    if (r) print(r);
+    if (r) print(Array.isArray(r) ? r[0] : r, Array.isArray(r) ? r[1] : undefined);
   } else {
     print("Unknown command: " + name + "  (type HELP)", "c-yellow");
   }
